@@ -66,6 +66,25 @@ const handler = NextAuth({
       if (account) {
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
+
+        if (account.access_token) {
+          try {
+            // 解析 JWT token 获取角色信息
+            const base64Url = account.access_token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+              return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            
+            const payload = JSON.parse(jsonPayload);
+            token.roles = payload.realm_access?.roles || [];
+            token.preferred_username = payload.preferred_username;
+          } catch (error) {
+            console.error('Failed to parse token:', error);
+          }
+        }
+
+
         // Keycloak 回傳 expires_in/refresh_expires_in（秒），NextAuth 有時提供 expires_at
         const nowSec = Math.floor(Date.now() / 1000);
         const expiresAtSec =
@@ -107,6 +126,8 @@ const handler = NextAuth({
       s.accessToken = token.accessToken as string | undefined;
       s.error = token.error;
       s.accessTokenExpires = token.accessTokenExpires;
+      s.roles = token.roles || [];
+      s.preferred_username = token.preferred_username;
       return session;
     },
   },

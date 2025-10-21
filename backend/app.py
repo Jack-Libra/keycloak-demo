@@ -48,42 +48,25 @@ def protected_api():
     if len(parts) == 2 and parts[0].lower() == "bearer":
         token = parts[1].strip()
     else:
-        token = auth.strip()  # 兼容客戶端直接傳純 token
+        token = auth.strip()
 
     if not token:
         return jsonify({"error": "invalid authorization header"}), 401
 
-    # 觀察 token 內容（僅解析 payload，不驗簽），便於除錯 401 問題
+    # 使用 decode_token() 方法解析JWT token
     try:
-        parts = token.split(".")
-        if len(parts) == 3:
-            payload_b64 = parts[1] + "==="  # base64url padding
-            payload_json = base64.urlsafe_b64decode(payload_b64.encode()).decode()
-            claims = json.loads(payload_json)
-            exp = claims.get("exp")
-            iat = claims.get("iat")
-            nbf = claims.get("nbf")
-            aud = claims.get("aud")
-            azp = claims.get("azp")
-            iss = claims.get("iss")
-            now = int(time.time())
-            app.logger.warning(
-                "jwt payload: iss=%s aud=%s azp=%s iat=%s nbf=%s exp=%s now=%s",
-                iss,
-                aud,
-                azp,
-                iat,
-                nbf,
-                exp,
-                now,
-            )
-    except Exception as e:
-        app.logger.warning("decode jwt payload failed: %s", e)
-
-    try:
-        userinfo = keycloak_openid.userinfo(token)
+        # 解碼token獲取claims
+        decoded_token = keycloak_openid.decode_token(token)
+        
+        # 从decoded token獲取角色和用戶信息
+        roles = decoded_token.get("realm_access", {}).get("roles", [])
+        username = decoded_token.get("preferred_username")
+        
+        app.logger.warning(f"Decoded Roles: {roles}")
+        app.logger.warning(f"Decoded Username: {username}")
+        
     except KeycloakAuthenticationError as e:
-        app.logger.error("userinfo failed: code=%s url=%s body=%s", e.response_code, getattr(e, "url", None), e.response_body)
+        app.logger.error("decode_token failed: code=%s url=%s body=%s", e.response_code, getattr(e, "url", None), e.response_body)
         return jsonify({
             "error": "invalid token",
             "code": e.response_code,
@@ -91,11 +74,12 @@ def protected_api():
             "body": e.response_body.decode() if isinstance(e.response_body, (bytes, bytearray)) else e.response_body,
         }), 401
     except Exception as e:
-        app.logger.exception("userinfo failed (unexpected)")
+        app.logger.exception("decode_token failed (unexpected)")
         return jsonify({"error": "invalid token", "detail": str(e)}), 401
 
-    username = userinfo.get("preferred_username")
-    roles = userinfo.get("realm_access", {}).get("roles", [])
+    # 使用從JWT解析的角色信息
+    app.logger.warning(f"Final roles check: {roles}")
+    app.logger.warning(f"Admin check: {'admin' in roles}")
 
     # 紀錄 API 呼叫
     cursor.execute(
